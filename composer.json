@@ -1,12 +1,12 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/laravel",
+    "name": "youcast/youcast",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
+    "description": "Turn YouTube videos into podcasts with YouCast.",
     "keywords": ["laravel", "framework"],
     "license": "MIT",
     "require": {
-        "php": "^8.3",
+        "php": "^8.2",
         "laravel/framework": "^13.8",
         "laravel/tinker": "^3.0"
     },

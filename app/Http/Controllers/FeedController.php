@@ -172,7 +172,9 @@ class FeedController extends Controller
         
         $channel = $xml->addChild('channel');
         $channel->addChild('title', htmlspecialchars($feedData['name']));
-        $channel->addChild('description', htmlspecialchars($feedData['description'] ?? ''));
+        $editUrl = route('feed.edit', ['id' => $id]);
+        $description = ($feedData['description'] ?? '') . "\n\nEdit this podcast: " . $editUrl;
+        $channel->addChild('description', htmlspecialchars($description));
         $channel->addChild('link', url('/feeds/' . $id . '.rss'));
         $channel->addChild('language', htmlspecialchars($feedData['language'] ?? 'en'));
         
@@ -242,47 +244,56 @@ class FeedController extends Controller
 
         $youtubeUrl = $episode['youtube_url'];
 
-        // Use yt-dlp to extract and stream audio in real-time
-        $process = new Process([
-            'yt-dlp',
-            '-f', 'bestaudio/best',
-            '--extract-audio',
-            '--audio-format', 'mp3',
-            '--audio-quality', '0',
-            '-o', '-',
-            '--no-warnings',
-            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            '--no-check-certificate',
-            $youtubeUrl
+        return response()->stream(function () use ($youtubeUrl) {
+            $process = new Process([
+                'yt-dlp',
+                '-f', 'bestaudio',
+                '--extract-audio',
+                '--audio-format', 'mp3',
+                '--audio-quality', '0',
+                '-o', '-',
+                '--no-warnings',
+                '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                '--no-check-certificate',
+                $youtubeUrl
+            ]);
+
+            $process->setTimeout(3600); // 1 hour timeout for long podcasts
+            $process->setIdleTimeout(300); // 5 minute idle timeout
+
+            try {
+                $process->start();
+
+                foreach ($process->getIterator() as $type => $buffer) {
+                    if (connection_aborted()) {
+                        $process->stop();
+                        break;
+                    }
+
+                    if ($type === Process::OUT) {
+                        echo $buffer;
+                        if (ob_get_level() > 0) {
+                            ob_flush();
+                        }
+                        flush();
+                    }
+                }
+
+                if (!$process->isSuccessful() && !connection_aborted()) {
+                    Log::error('yt-dlp failed: ' . $process->getErrorOutput());
+                }
+
+            } catch (\Exception $e) {
+                Log::error('Streaming failed: ' . $e->getMessage());
+                if ($process->isRunning()) {
+                    $process->stop();
+                }
+            }
+        }, 200, [
+            'Content-Type' => 'audio/mpeg',
+            'Content-Disposition' => 'attachment; filename="episode_' . $episodeId . '.mp3"',
+            'X-Accel-Buffering' => 'no',
+            'Cache-Control' => 'no-cache, must-revalidate',
         ]);
-
-        $process->setTimeout(300); // 5 minute timeout
-        $process->setIdleTimeout(60); // 1 minute idle timeout
-
-        try {
-            $process->run();
-
-            if (!$process->isSuccessful()) {
-                $errorOutput = $process->getErrorOutput();
-                \Log::error('yt-dlp failed: ' . $errorOutput);
-                abort(500, 'Failed to extract audio: ' . $errorOutput);
-            }
-
-            $audioContent = $process->getOutput();
-
-            if (empty($audioContent)) {
-                abort(500, 'No audio content received from yt-dlp');
-            }
-
-            return response($audioContent, 200)
-                ->header('Content-Type', 'audio/mpeg')
-                ->header('Content-Disposition', 'attachment; filename="episode_' . $episodeId . '.mp3"')
-                ->header('Content-Length', strlen($audioContent))
-                ->header('Accept-Ranges', 'bytes');
-
-        } catch (ProcessFailedException $e) {
-            Log::error('Process failed: ' . $e->getMessage());
-            abort(500, 'Failed to extract audio: ' . $e->getMessage());
-        }
     }
 }
