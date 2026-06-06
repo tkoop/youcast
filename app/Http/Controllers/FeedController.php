@@ -253,20 +253,12 @@ class FeedController extends Controller
         return response()->stream(function () use ($youtubeUrl, $ytDlpPath, $episodeId, $id) {
             // Check for per-feed cookies file
             $cookiesPath = storage_path('app/private/feeds/' . $id . '.cookies.txt');
-            $cachePath = storage_path('app/private/feeds/' . $id . '.cache');
             
-            if (!is_dir($cachePath)) {
-                mkdir($cachePath, 0755, true);
-            }
-
             $authArg = '';
             $usingCookies = false;
             if (file_exists($cookiesPath)) {
                 $authArg = '--cookies ' . escapeshellarg($cookiesPath);
                 $usingCookies = true;
-            } else {
-                // Try OAuth if no cookies, using a per-feed cache directory
-                $authArg = '--username oauth --password "" --cache-dir ' . escapeshellarg($cachePath);
             }
 
             // Stream from yt-dlp directly into ffmpeg
@@ -347,90 +339,5 @@ class FeedController extends Controller
         file_put_contents($cookiesPath, $request->input('cookies'));
 
         return back()->with('success', 'YouTube cookies saved successfully.');
-    }
-
-    public function startOAuth($id)
-    {
-        $ytDlpPath = 'yt-dlp';
-        if (file_exists(base_path('bin/yt-dlp'))) {
-            $ytDlpPath = base_path('bin/yt-dlp');
-        }
-
-        $cachePath = storage_path('app/private/feeds/' . $id . '.cache');
-        if (!is_dir($cachePath)) {
-            mkdir($cachePath, 0755, true);
-        }
-
-        // Start yt-dlp with oauth to get the code, using per-feed cache
-        $command = sprintf(
-            '%s --username oauth --password "" --cache-dir %s --no-playlist "https://www.youtube.com/watch?v=dQw4w9WgXcQ"',
-            escapeshellarg($ytDlpPath),
-            escapeshellarg($cachePath)
-        );
-
-        $descriptorspec = [
-            0 => ["pipe", "r"], // stdin
-            1 => ["pipe", "w"], // stdout
-            2 => ["pipe", "w"]  // stderr
-        ];
-
-        $process = proc_open($command, $descriptorspec, $pipes);
-
-        if (is_resource($process)) {
-            // Read stderr where the auth message appears
-            $stderr = "";
-            $start = time();
-            while (!feof($pipes[2])) {
-                $line = fgets($pipes[2]);
-                $stderr .= $line;
-                if (preg_match('/visit (https:\/\/www\.google\.com\/device) and enter ([A-Z0-9-]+)/', $line, $matches)) {
-                    $url = $matches[1];
-                    $code = $matches[2];
-                    
-                    fclose($pipes[0]);
-                    fclose($pipes[1]);
-                    fclose($pipes[2]);
-                    proc_terminate($process);
-                    
-                    return response()->json([
-                        'url' => $url,
-                        'code' => $code,
-                    ]);
-                }
-                
-                // Timeout after 10 seconds of reading if we don't find the code
-                if (time() - $start > 10) break;
-            }
-
-            fclose($pipes[0]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            proc_close($process);
-        }
-
-        return response()->json(['error' => 'Could not start OAuth flow. Please make sure yt-dlp is up to date.'], 500);
-    }
-
-    public function checkOAuth($id)
-    {
-        $ytDlpPath = 'yt-dlp';
-        if (file_exists(base_path('bin/yt-dlp'))) {
-            $ytDlpPath = base_path('bin/yt-dlp');
-        }
-
-        $cachePath = storage_path('app/private/feeds/' . $id . '.cache');
-
-        $command = sprintf(
-            '%s --username oauth --password "" --cache-dir %s --get-id "https://www.youtube.com/watch?v=dQw4w9WgXcQ" 2>&1', 
-            escapeshellarg($ytDlpPath),
-            escapeshellarg($cachePath)
-        );
-        exec($command, $output, $returnVar);
-
-        if ($returnVar === 0) {
-            return response()->json(['status' => 'authenticated']);
-        }
-
-        return response()->json(['status' => 'pending']);
     }
 }
