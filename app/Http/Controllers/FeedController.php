@@ -244,20 +244,21 @@ class FeedController extends Controller
 
         $youtubeUrl = $episode['youtube_url'];
 
-        return response()->stream(function () use ($youtubeUrl) {
-            $process = new Process([
-                'yt-dlp',
-                '-f', 'bestaudio',
-                '--extract-audio',
-                '--audio-format', 'mp3',
-                '--audio-quality', '0',
-                '-o', '-',
-                '--no-warnings',
-                '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                '--no-check-certificate',
-                $youtubeUrl
-            ]);
+        // Use local bin/yt-dlp if it exists, otherwise use system yt-dlp
+        $ytDlpPath = 'yt-dlp';
+        if (file_exists(base_path('bin/yt-dlp'))) {
+            $ytDlpPath = base_path('bin/yt-dlp');
+        }
 
+        return response()->stream(function () use ($youtubeUrl, $ytDlpPath) {
+            // Use a pipe to stream from yt-dlp through ffmpeg to ensure reliable MP3 streaming
+            $command = sprintf(
+                '%s -f bestaudio --no-playlist --no-warnings -o - %s | ffmpeg -i - -f mp3 -b:a 128k -',
+                escapeshellarg($ytDlpPath),
+                escapeshellarg($youtubeUrl)
+            );
+
+            $process = Process::fromShellCommandline($command);
             $process->setTimeout(3600); // 1 hour timeout for long podcasts
             $process->setIdleTimeout(300); // 5 minute idle timeout
 
@@ -280,7 +281,7 @@ class FeedController extends Controller
                 }
 
                 if (!$process->isSuccessful() && !connection_aborted()) {
-                    Log::error('yt-dlp failed: ' . $process->getErrorOutput());
+                    Log::error('Audio streaming failed: ' . $process->getErrorOutput());
                 }
 
             } catch (\Exception $e) {
