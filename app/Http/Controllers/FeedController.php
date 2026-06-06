@@ -367,6 +367,7 @@ class FeedController extends Controller
             if (file_exists($cookiesJsonPath)) {
                 Log::info("cookies.json found for feed {$id}, regenerating feed cookie file", [
                     'cookies_json' => $cookiesJsonPath,
+                    'cookies_json_size' => filesize($cookiesJsonPath),
                     'cookie_output' => $cookiesPath,
                 ]);
 
@@ -383,6 +384,7 @@ class FeedController extends Controller
                     Log::info("Regenerated feed cookies file", [
                         'feed_cookies' => $cookiesPath,
                         'cookie_count' => substr_count($netscapeCookies, "\n") - 3,
+                        'cookie_file_size' => filesize($cookiesPath),
                     ]);
                 } else {
                     Log::warning("Failed to convert cookies.json to Netscape format", [
@@ -395,6 +397,7 @@ class FeedController extends Controller
                 $usingCookies = true;
                 Log::info("Using existing feed cookie file", [
                     'feed_cookies' => $cookiesPath,
+                    'cookie_file_size' => filesize($cookiesPath),
                 ]);
             } else {
                 Log::warning("No cookies available for yt-dlp streaming", [
