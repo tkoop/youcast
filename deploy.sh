@@ -5,6 +5,9 @@
 
 set -e # Exit immediately if a command exits with a non-zero status.
 
+# Ensure binaries are in the PATH for sub-processes
+export PATH=$PATH:/usr/local/bin:/usr/bin:/bin
+
 echo "🚀 Starting deployment..."
 
 # 1. Pull the latest code
@@ -13,7 +16,7 @@ git pull origin master
 
 # 2. Install PHP dependencies
 echo "🐘 Installing PHP dependencies..."
-composer install --no-dev --optimize-autoloader --no-interaction
+composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
 
 # 3. Update the YouTube extraction binary
 echo "📹 Updating yt-dlp binary..."
