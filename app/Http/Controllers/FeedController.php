@@ -30,6 +30,14 @@ class FeedController extends Controller
             $netscape .= "# http://curl.haxx.se/rfc/cookie_spec.html\n";
             $netscape .= "# This is a generated file!  Do not edit.\n\n";
 
+            $cookieNames = [];
+            $cookieStats = [
+                'cookie_count' => 0,
+                'http_only' => 0,
+                'secure' => 0,
+                'host_only' => 0,
+            ];
+
             // Convert each cookie to Netscape format
             foreach ($cookies as $cookie) {
                 // Skip if required fields are missing
@@ -62,7 +70,24 @@ class FeedController extends Controller
                     $name,
                     $value
                 );
+
+                $cookieNames[] = $name;
+                $cookieStats['cookie_count']++;
+                if ($httpOnly) {
+                    $cookieStats['http_only']++;
+                }
+                if ($secure === 'TRUE') {
+                    $cookieStats['secure']++;
+                }
+                if ($hostOnly) {
+                    $cookieStats['host_only']++;
+                }
             }
+
+            Log::info('Converted cookies.json to Netscape format', array_merge($cookieStats, [
+                'cookies_json' => $jsonPath,
+                'cookie_names' => array_slice($cookieNames, 0, 25),
+            ]));
 
             return $netscape;
         } catch (\Exception $e) {
