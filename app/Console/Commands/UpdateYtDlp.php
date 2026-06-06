@@ -42,20 +42,26 @@ class UpdateYtDlp extends Command
         $this->info('Downloading latest binary from GitHub...');
 
         try {
-            $response = Http::withOptions([
-                'sink' => $binPath,
-                'follow_redirects' => true,
-            ])->get($url);
+            // Using file_put_contents with stream context for more control
+            $content = file_get_contents($url);
+            
+            if ($content === false) {
+                $this->error('Failed to download binary from GitHub.');
+                return;
+            }
 
-            if ($response->successful()) {
+            if (file_put_contents($binPath, $content) !== false) {
                 chmod($binPath, 0755);
                 $this->success('yt-dlp updated successfully at ' . $binPath);
                 
                 // Show version
-                $version = shell_exec($binPath . ' --version');
+                unset($content); // Free memory
+                sleep(1); // Give the OS a moment to release the file handle
+                
+                $version = shell_exec(escapeshellarg($binPath) . ' --version');
                 $this->line('New version: ' . trim($version));
             } else {
-                $this->error('Failed to download binary. Status: ' . $response->status());
+                $this->error('Failed to write binary to disk.');
             }
         } catch (\Exception $e) {
             $this->error('Error: ' . $e->getMessage());

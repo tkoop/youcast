@@ -251,44 +251,57 @@ class FeedController extends Controller
         }
 
         return response()->stream(function () use ($youtubeUrl, $ytDlpPath) {
-            // Use a pipe to stream from yt-dlp through ffmpeg to ensure reliable MP3 streaming
-            $command = sprintf(
-                '%s -f bestaudio --no-playlist --no-warnings -o - %s | ffmpeg -i - -f mp3 -b:a 128k -',
+            // Step 1: Get the direct stream URL from yt-dlp
+            // This is much more reliable than piping raw data between processes
+            $urlCommand = sprintf(
+                '%s -f bestaudio --get-url --no-playlist --no-warnings %s',
                 escapeshellarg($ytDlpPath),
                 escapeshellarg($youtubeUrl)
             );
 
-            $process = Process::fromShellCommandline($command);
-            $process->setTimeout(3600); // 1 hour timeout for long podcasts
-            $process->setIdleTimeout(300); // 5 minute idle timeout
+            $directUrl = trim(shell_exec($urlCommand));
 
-            try {
-                $process->start();
+            if (empty($directUrl) || !filter_var($directUrl, FILTER_VALIDATE_URL)) {
+                Log::error("Could not get direct URL for: " . $youtubeUrl);
+                return;
+            }
 
-                foreach ($process->getIterator() as $type => $buffer) {
+            // Step 2: Stream the direct URL through ffmpeg to convert to MP3 on the fly
+            // Using direct URL allows ffmpeg to handle the stream much better
+            $ffmpegCommand = sprintf(
+                'ffmpeg -i %s -f mp3 -b:a 128k -map 0:a -',
+                escapeshellarg($directUrl)
+            );
+
+            $descriptorspec = [
+                0 => ["pipe", "r"], // stdin
+                1 => ["pipe", "w"], // stdout
+                2 => ["pipe", "w"]  // stderr
+            ];
+
+            $process = proc_open($ffmpegCommand, $descriptorspec, $pipes);
+
+            if (is_resource($process)) {
+                // We don't need stdin
+                fclose($pipes[0]);
+
+                // Stream the output from ffmpeg's stdout to the browser
+                while (!feof($pipes[1])) {
                     if (connection_aborted()) {
-                        $process->stop();
                         break;
                     }
-
-                    if ($type === Process::OUT) {
-                        echo $buffer;
-                        if (ob_get_level() > 0) {
-                            ob_flush();
-                        }
-                        flush();
-                    }
+                    echo fread($pipes[1], 16384);
+                    flush();
                 }
 
-                if (!$process->isSuccessful() && !connection_aborted()) {
-                    Log::error('Audio streaming failed: ' . $process->getErrorOutput());
+                $errors = stream_get_contents($pipes[2]);
+                if ($errors && !feof($pipes[1])) {
+                     Log::error("FFmpeg error: " . $errors);
                 }
 
-            } catch (\Exception $e) {
-                Log::error('Streaming failed: ' . $e->getMessage());
-                if ($process->isRunning()) {
-                    $process->stop();
-                }
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                proc_close($process);
             }
         }, 200, [
             'Content-Type' => 'audio/mpeg',
