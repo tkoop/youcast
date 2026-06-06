@@ -259,6 +259,11 @@ class FeedController extends Controller
                 escapeshellarg($youtubeUrl)
             );
 
+            Log::info("Starting audio stream for episode {$episodeId}", [
+                'url' => $youtubeUrl,
+                'command' => $command
+            ]);
+
             $descriptorspec = [
                 0 => ["pipe", "r"], // stdin
                 1 => ["pipe", "w"], // stdout
@@ -271,23 +276,36 @@ class FeedController extends Controller
                 // We don't need stdin
                 fclose($pipes[0]);
 
+                $totalBytes = 0;
+                $chunkCount = 0;
+
                 // Stream the output from the pipeline to the browser
                 while (!feof($pipes[1])) {
                     if (connection_aborted()) {
+                        Log::warning("Connection aborted while streaming episode {$episodeId}");
                         break;
                     }
-                    echo fread($pipes[1], 16384);
+                    $chunk = fread($pipes[1], 16384);
+                    $bytes = strlen($chunk);
+                    $totalBytes += $bytes;
+                    $chunkCount++;
+                    
+                    echo $chunk;
                     flush();
                 }
 
                 $errors = stream_get_contents($pipes[2]);
-                if (!empty($errors)) {
-                     Log::error("Streaming error for episode {$episodeId}: " . $errors);
-                }
+                $exitCode = proc_close($process);
 
-                fclose($pipes[1]);
-                fclose($pipes[2]);
-                proc_close($process);
+                Log::info("Finished streaming episode {$episodeId}", [
+                    'total_bytes' => $totalBytes,
+                    'chunks' => $chunkCount,
+                    'exit_code' => $exitCode
+                ]);
+
+                if (!empty($errors)) {
+                     Log::error("Stream stderr for episode {$episodeId}: " . $errors);
+                }
             } else {
                 Log::error("Failed to start streaming process for episode {$episodeId}");
             }
