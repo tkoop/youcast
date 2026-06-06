@@ -80,6 +80,47 @@
                             </form>
                         </div>
 
+                        <!-- YouTube Authentication -->
+                        <div class="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 mt-6">
+                            <h2 class="text-xl font-semibold text-white mb-4">YouTube Authentication</h2>
+                            
+                            <div class="space-y-6">
+                                <!-- Cookies Option -->
+                                <div>
+                                    <h3 class="text-sm font-medium text-gray-300 mb-2">Option 1: Paste Cookies</h3>
+                                    <form action="{{ route('settings.youtube-cookies', ['id' => $feed['id']]) }}" method="POST">
+                                        @csrf
+                                        <textarea name="cookies" rows="3" 
+                                            placeholder="Paste Netscape formatted cookies here..."
+                                            class="w-full px-3 py-2 bg-black/30 border border-white/20 rounded-lg text-xs text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-pink-500 transition mb-2 font-mono">{{ @file_get_contents(storage_path('app/private/feeds/' . $feed['id'] . '.cookies.txt')) }}</textarea>
+                                        <button type="submit" class="text-xs bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded transition">
+                                            Save Cookies
+                                        </button>
+                                    </form>
+                                </div>
+
+                                <!-- OAuth Option -->
+                                <div id="oauth-section">
+                                    <h3 class="text-sm font-medium text-gray-300 mb-2">Option 2: YouTube Sign-in</h3>
+                                    <div id="oauth-status" class="text-xs text-gray-400 mb-3">
+                                        Checking authentication status...
+                                    </div>
+                                    <button id="start-oauth" class="bg-red-600 hover:bg-red-700 text-white text-xs font-bold py-2 px-4 rounded transition flex items-center gap-2">
+                                        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 4-8 4z"/></svg>
+                                        Sign in with YouTube
+                                    </button>
+
+                                    <div id="oauth-instructions" class="hidden mt-4 p-3 bg-blue-500/20 border border-blue-500/50 rounded-lg">
+                                        <p class="text-xs text-blue-200 mb-2">To sign in, visit:</p>
+                                        <a id="oauth-url" href="#" target="_blank" class="text-sm font-bold text-white underline break-all"></a>
+                                        <p class="text-xs text-blue-200 mt-3 mb-1">And enter code:</p>
+                                        <div id="oauth-code" class="text-xl font-mono font-bold text-white tracking-widest"></div>
+                                        <p class="text-[10px] text-blue-300 mt-3 italic">Waiting for you to complete sign-in...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- RSS Feed URL -->
                         <div class="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20 mt-6">
                             <h2 class="text-xl font-semibold text-white mb-4">RSS Feed URL</h2>
@@ -184,6 +225,69 @@
             </div>
         </main>
     </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const startBtn = document.getElementById('start-oauth');
+            const statusDiv = document.getElementById('oauth-status');
+            const instructionsDiv = document.getElementById('oauth-instructions');
+            const urlLink = document.getElementById('oauth-url');
+            const codeDiv = document.getElementById('oauth-code');
+
+            function checkStatus() {
+                fetch('{{ route('settings.youtube-oauth-check', ['id' => $feed['id']]) }}')
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.status === 'authenticated') {
+                            statusDiv.innerHTML = '<span class="text-green-400 font-bold">✓ Authenticated with YouTube</span>';
+                            startBtn.innerHTML = 'Re-authenticate';
+                            instructionsDiv.classList.add('hidden');
+                        } else {
+                            statusDiv.innerText = 'Not authenticated or session expired.';
+                        }
+                    });
+            }
+
+            checkStatus();
+
+            startBtn.addEventListener('click', function() {
+                startBtn.disabled = true;
+                startBtn.innerText = 'Starting...';
+                
+                fetch('{{ route('settings.youtube-oauth', ['id' => $feed['id']]) }}')
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.url && data.code) {
+                            urlLink.href = data.url;
+                            urlLink.innerText = data.url;
+                            codeDiv.innerText = data.code;
+                            instructionsDiv.classList.remove('hidden');
+                            startBtn.innerText = 'Waiting...';
+                            
+                            // Poll for status every 5 seconds
+                            const interval = setInterval(() => {
+                                fetch('{{ route('settings.youtube-oauth-check', ['id' => $feed['id']]) }}')
+                                    .then(r => r.json())
+                                    .then(statusData => {
+                                        if (statusData.status === 'authenticated') {
+                                            clearInterval(interval);
+                                            checkStatus();
+                                            startBtn.disabled = false;
+                                        }
+                                    });
+                            }, 5000);
+                        } else {
+                            alert(data.error || 'Failed to start login flow.');
+                            startBtn.disabled = false;
+                            startBtn.innerText = 'Sign in with YouTube';
+                        }
+                    })
+                    .catch(err => {
+                        alert('Error: ' + err.message);
+                        startBtn.disabled = false;
+                    });
+            });
+        });
+    </script>
 </body>
 
 </html>
