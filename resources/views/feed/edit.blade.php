@@ -87,17 +87,23 @@
                             <div class="space-y-6">
                                 <!-- Cookies Option -->
                                 <div>
-                                    <p class="text-xs text-gray-400 mb-4">
-                                        YouTube often blocks server IPs. To bypass this, paste your YouTube cookies here. 
-                                        Use a browser extension like "Cookie Editor" to export cookies in <b>Netscape/yt-dlp</b> format.
-                                    </p>
+                                    @if ($currentCookies)
+                                        <p class="text-xs text-green-400 mb-4 bg-green-500/10 p-2 rounded border border-green-500/30">
+                                            ✓ YouTube cookies loaded from cookies.json file
+                                        </p>
+                                        <textarea rows="5" 
+                                            readonly
+                                            class="w-full px-3 py-2 bg-black/30 border border-white/20 rounded-lg text-xs text-gray-400 placeholder-gray-500 transition mb-2 font-mono resize-none">{{ $currentCookies }}</textarea>
+                                    @else
+                                        <p class="text-xs text-yellow-400 mb-4 bg-yellow-500/10 p-2 rounded border border-yellow-500/30">
+                                            ⚠ No cookies found. Click "Load Cookies" to load them from cookies.json
+                                        </p>
+                                    @endif
+                                    
                                     <form action="{{ route('settings.youtube-cookies', ['id' => $feed['id']]) }}" method="POST">
                                         @csrf
-                                        <textarea name="cookies" rows="5" 
-                                            placeholder="# Netscape HTTP Cookie File..."
-                                            class="w-full px-3 py-2 bg-black/30 border border-white/20 rounded-lg text-xs text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-pink-500 transition mb-2 font-mono">{{ @file_get_contents(storage_path('app/private/feeds/' . $feed['id'] . '.cookies.txt')) }}</textarea>
                                         <button type="submit" class="w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 text-sm">
-                                            Save YouTube Cookies
+                                            Load Cookies from cookies.json
                                         </button>
                                     </form>
                                 </div>

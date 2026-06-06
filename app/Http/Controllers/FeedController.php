@@ -11,6 +11,60 @@ use Symfony\Component\Process\Exception\ProcessFailedException;
 
 class FeedController extends Controller
 {
+    private function convertJsonCookiesToNetscape($jsonPath)
+    {
+        if (!file_exists($jsonPath)) {
+            return null;
+        }
+
+        try {
+            $jsonContent = file_get_contents($jsonPath);
+            $cookies = json_decode($jsonContent, true);
+
+            if (!is_array($cookies)) {
+                return null;
+            }
+
+            // Create Netscape format header
+            $netscape = "# Netscape HTTP Cookie File\n";
+            $netscape .= "# http://curl.haxx.se/rfc/cookie_spec.html\n";
+            $netscape .= "# This is a generated file!  Do not edit.\n\n";
+
+            // Convert each cookie to Netscape format
+            foreach ($cookies as $cookie) {
+                // Skip if required fields are missing
+                if (!isset($cookie['name']) || !isset($cookie['value'])) {
+                    continue;
+                }
+
+                $domain = $cookie['domain'] ?? '.youtube.com';
+                $domainSpecified = ($cookie['hostOnly'] ?? false) ? 'FALSE' : 'TRUE';
+                $path = $cookie['path'] ?? '/';
+                $secure = ($cookie['secure'] ?? false) ? 'TRUE' : 'FALSE';
+                $expiration = (int)($cookie['expirationDate'] ?? 0);
+                $name = $cookie['name'] ?? '';
+                $value = $cookie['value'] ?? '';
+
+                // Format: domain domain_specified path secure expiration name value
+                $netscape .= sprintf(
+                    "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+                    $domain,
+                    $domainSpecified,
+                    $path,
+                    $secure,
+                    $expiration,
+                    $name,
+                    $value
+                );
+            }
+
+            return $netscape;
+        } catch (\Exception $e) {
+            Log::error("Failed to convert cookies from JSON: " . $e->getMessage());
+            return null;
+        }
+    }
+
     private function extractYouTubeId($url)
     {
         $pattern = '/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i';
@@ -85,7 +139,28 @@ class FeedController extends Controller
 
         $feedData = json_decode(file_get_contents($feedFile), true);
 
-        return view('feed.edit', ['feed' => $feedData]);
+        // Try to load cookies from the JSON file
+        $cookiesJsonPath = storage_path('app/private/cookies.json');
+        $currentCookies = '';
+        if (file_exists($cookiesJsonPath)) {
+            $convertedCookies = $this->convertJsonCookiesToNetscape($cookiesJsonPath);
+            if ($convertedCookies !== null) {
+                $currentCookies = $convertedCookies;
+            }
+        }
+
+        // Fall back to feed-specific cookies file if JSON conversion failed
+        if (empty($currentCookies)) {
+            $feedCookiesPath = storage_path('app/private/feeds/' . $id . '.cookies.txt');
+            if (file_exists($feedCookiesPath)) {
+                $currentCookies = file_get_contents($feedCookiesPath);
+            }
+        }
+
+        return view('feed.edit', [
+            'feed' => $feedData,
+            'currentCookies' => $currentCookies,
+        ]);
     }
 
     public function update(Request $request, $id)
@@ -331,13 +406,19 @@ class FeedController extends Controller
 
     public function saveCookies(Request $request, $id)
     {
-        $request->validate([
-            'cookies' => 'required|string',
-        ]);
+        $cookiesJsonPath = storage_path('app/private/cookies.json');
+        
+        // Convert cookies from JSON file to Netscape format
+        $netscapeCookies = $this->convertJsonCookiesToNetscape($cookiesJsonPath);
+        
+        if ($netscapeCookies === null) {
+            return back()->with('error', 'Cookies file not found or invalid.');
+        }
 
+        // Save the converted cookies to the feed-specific cookies file
         $cookiesPath = storage_path('app/private/feeds/' . $id . '.cookies.txt');
-        file_put_contents($cookiesPath, $request->input('cookies'));
+        file_put_contents($cookiesPath, $netscapeCookies);
 
-        return back()->with('success', 'YouTube cookies saved successfully.');
+        return back()->with('success', 'YouTube cookies loaded and saved from cookies.json file.');
     }
 }
