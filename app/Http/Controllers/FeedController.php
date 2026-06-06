@@ -332,17 +332,19 @@ class FeedController extends Controller
         }
 
         return response()->stream(function () use ($youtubeUrl, $ytDlpPath, $episodeId, $id) {
-            // Check for per-feed cookies file
+            // Check for cookies JSON and regenerate the feed cookie file if available.
             $cookiesPath = storage_path('app/private/feeds/' . $id . '.cookies.txt');
             $cookiesJsonPath = storage_path('app/private/cookies.json');
             
             $authArg = '';
             $usingCookies = false;
 
-            if (file_exists($cookiesPath)) {
-                $authArg = '--cookies ' . escapeshellarg($cookiesPath);
-                $usingCookies = true;
-            } elseif (file_exists($cookiesJsonPath)) {
+            if (file_exists($cookiesJsonPath)) {
+                Log::info("cookies.json found for feed {$id}, regenerating feed cookie file", [
+                    'cookies_json' => $cookiesJsonPath,
+                    'cookie_output' => $cookiesPath,
+                ]);
+
                 $netscapeCookies = $this->convertJsonCookiesToNetscape($cookiesJsonPath);
                 if ($netscapeCookies !== null) {
                     $feedDir = storage_path('app/private/feeds');
@@ -352,7 +354,28 @@ class FeedController extends Controller
                     file_put_contents($cookiesPath, $netscapeCookies);
                     $authArg = '--cookies ' . escapeshellarg($cookiesPath);
                     $usingCookies = true;
+
+                    Log::info("Regenerated feed cookies file", [
+                        'feed_cookies' => $cookiesPath,
+                        'cookie_count' => substr_count($netscapeCookies, "\n") - 3,
+                    ]);
+                } else {
+                    Log::warning("Failed to convert cookies.json to Netscape format", [
+                        'cookies_json' => $cookiesJsonPath,
+                        'feed_id' => $id,
+                    ]);
                 }
+            } elseif (file_exists($cookiesPath)) {
+                $authArg = '--cookies ' . escapeshellarg($cookiesPath);
+                $usingCookies = true;
+                Log::info("Using existing feed cookie file", [
+                    'feed_cookies' => $cookiesPath,
+                ]);
+            } else {
+                Log::warning("No cookies available for yt-dlp streaming", [
+                    'cookies_json' => $cookiesJsonPath,
+                    'feed_cookie' => $cookiesPath,
+                ]);
             }
 
             // Stream from yt-dlp directly into ffmpeg
