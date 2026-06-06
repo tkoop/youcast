@@ -250,27 +250,13 @@ class FeedController extends Controller
             $ytDlpPath = base_path('bin/yt-dlp');
         }
 
-        return response()->stream(function () use ($youtubeUrl, $ytDlpPath) {
-            // Step 1: Get the direct stream URL from yt-dlp
-            // This is much more reliable than piping raw data between processes
-            $urlCommand = sprintf(
-                '%s -f bestaudio --get-url --no-playlist --no-warnings %s',
+        return response()->stream(function () use ($youtubeUrl, $ytDlpPath, $episodeId) {
+            // Stream from yt-dlp directly into ffmpeg
+            // This is much more reliable as yt-dlp handles all the authentication/headers
+            $command = sprintf(
+                '%s -f "ba/b" --no-playlist --no-warnings %s -o - | ffmpeg -i pipe:0 -f mp3 -b:a 128k -map 0:a -',
                 escapeshellarg($ytDlpPath),
                 escapeshellarg($youtubeUrl)
-            );
-
-            $directUrl = trim(shell_exec($urlCommand));
-
-            if (empty($directUrl) || !filter_var($directUrl, FILTER_VALIDATE_URL)) {
-                Log::error("Could not get direct URL for: " . $youtubeUrl);
-                return;
-            }
-
-            // Step 2: Stream the direct URL through ffmpeg to convert to MP3 on the fly
-            // Using direct URL allows ffmpeg to handle the stream much better
-            $ffmpegCommand = sprintf(
-                'ffmpeg -i %s -f mp3 -b:a 128k -map 0:a -',
-                escapeshellarg($directUrl)
             );
 
             $descriptorspec = [
@@ -279,13 +265,13 @@ class FeedController extends Controller
                 2 => ["pipe", "w"]  // stderr
             ];
 
-            $process = proc_open($ffmpegCommand, $descriptorspec, $pipes);
+            $process = proc_open($command, $descriptorspec, $pipes);
 
             if (is_resource($process)) {
                 // We don't need stdin
                 fclose($pipes[0]);
 
-                // Stream the output from ffmpeg's stdout to the browser
+                // Stream the output from the pipeline to the browser
                 while (!feof($pipes[1])) {
                     if (connection_aborted()) {
                         break;
@@ -295,13 +281,15 @@ class FeedController extends Controller
                 }
 
                 $errors = stream_get_contents($pipes[2]);
-                if ($errors && !feof($pipes[1])) {
-                     Log::error("FFmpeg error: " . $errors);
+                if (!empty($errors)) {
+                     Log::error("Streaming error for episode {$episodeId}: " . $errors);
                 }
 
                 fclose($pipes[1]);
                 fclose($pipes[2]);
                 proc_close($process);
+            } else {
+                Log::error("Failed to start streaming process for episode {$episodeId}");
             }
         }, 200, [
             'Content-Type' => 'audio/mpeg',
