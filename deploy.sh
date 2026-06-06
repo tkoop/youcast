@@ -9,7 +9,7 @@ echo "🚀 Starting deployment..."
 
 # 1. Pull the latest code
 echo "📥 Pulling latest changes from git..."
-git pull origin main
+git pull origin master
 
 # 2. Install PHP dependencies
 echo "🐘 Installing PHP dependencies..."
