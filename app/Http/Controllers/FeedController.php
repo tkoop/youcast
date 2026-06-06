@@ -363,6 +363,7 @@ class FeedController extends Controller
             
             $authArg = '';
             $usingCookies = false;
+            $cookieSource = 'none';
 
             if (file_exists($cookiesJsonPath)) {
                 Log::info("cookies.json found for feed {$id}, regenerating feed cookie file", [
@@ -380,6 +381,7 @@ class FeedController extends Controller
                     file_put_contents($cookiesPath, $netscapeCookies);
                     $authArg = '--cookies ' . escapeshellarg($cookiesPath);
                     $usingCookies = true;
+                    $cookieSource = 'cookies.json';
 
                     Log::info("Regenerated feed cookies file", [
                         'feed_cookies' => $cookiesPath,
@@ -395,6 +397,7 @@ class FeedController extends Controller
             } elseif (file_exists($cookiesPath)) {
                 $authArg = '--cookies ' . escapeshellarg($cookiesPath);
                 $usingCookies = true;
+                $cookieSource = 'existing';
                 Log::info("Using existing feed cookie file", [
                     'feed_cookies' => $cookiesPath,
                     'cookie_file_size' => filesize($cookiesPath),
@@ -418,7 +421,9 @@ class FeedController extends Controller
             Log::info("Starting audio stream for episode {$episodeId} in feed {$id}", [
                 'url' => $youtubeUrl,
                 'command' => $command,
-                'using_cookies' => $usingCookies
+                'using_cookies' => $usingCookies,
+                'cookie_source' => $cookieSource,
+                'cookie_path' => $cookieSource !== 'none' ? $cookiesPath : null,
             ]);
 
             $descriptorspec = [
