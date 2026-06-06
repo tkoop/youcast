@@ -251,17 +251,26 @@ class FeedController extends Controller
         }
 
         return response()->stream(function () use ($youtubeUrl, $ytDlpPath, $episodeId) {
+            // Check for cookies file
+            $cookiesPath = storage_path('app/youtube-cookies.txt');
+            $cookiesArg = '';
+            if (file_exists($cookiesPath)) {
+                $cookiesArg = '--cookies ' . escapeshellarg($cookiesPath);
+            }
+
             // Stream from yt-dlp directly into ffmpeg
-            // This is much more reliable as yt-dlp handles all the authentication/headers
+            // Added --extractor-args to try and bypass bot detection
             $command = sprintf(
-                '%s -f "ba/b" --no-playlist --no-warnings %s -o - | ffmpeg -i pipe:0 -f mp3 -b:a 128k -map 0:a -',
+                '%s %s -f "ba/b" --no-playlist --no-warnings --extractor-args "youtube:player_client=android,web" %s -o - | ffmpeg -i pipe:0 -f mp3 -b:a 128k -map 0:a -',
                 escapeshellarg($ytDlpPath),
+                $cookiesArg,
                 escapeshellarg($youtubeUrl)
             );
 
             Log::info("Starting audio stream for episode {$episodeId}", [
                 'url' => $youtubeUrl,
-                'command' => $command
+                'command' => $command,
+                'using_cookies' => !empty($cookiesArg)
             ]);
 
             $descriptorspec = [
