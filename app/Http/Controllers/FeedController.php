@@ -38,12 +38,18 @@ class FeedController extends Controller
                 }
 
                 $domain = $cookie['domain'] ?? '.youtube.com';
-                $domainSpecified = ($cookie['hostOnly'] ?? false) ? 'FALSE' : 'TRUE';
+                $hostOnly = $cookie['hostOnly'] ?? false;
+                $httpOnly = $cookie['httpOnly'] ?? false;
+                $domainSpecified = $hostOnly ? 'FALSE' : 'TRUE';
                 $path = $cookie['path'] ?? '/';
                 $secure = ($cookie['secure'] ?? false) ? 'TRUE' : 'FALSE';
                 $expiration = (int)($cookie['expirationDate'] ?? 0);
                 $name = $cookie['name'] ?? '';
                 $value = $cookie['value'] ?? '';
+
+                if ($httpOnly) {
+                    $domain = '#HttpOnly_' . $domain;
+                }
 
                 // Format: domain domain_specified path secure expiration name value
                 $netscape .= sprintf(
@@ -328,12 +334,25 @@ class FeedController extends Controller
         return response()->stream(function () use ($youtubeUrl, $ytDlpPath, $episodeId, $id) {
             // Check for per-feed cookies file
             $cookiesPath = storage_path('app/private/feeds/' . $id . '.cookies.txt');
+            $cookiesJsonPath = storage_path('app/private/cookies.json');
             
             $authArg = '';
             $usingCookies = false;
+
             if (file_exists($cookiesPath)) {
                 $authArg = '--cookies ' . escapeshellarg($cookiesPath);
                 $usingCookies = true;
+            } elseif (file_exists($cookiesJsonPath)) {
+                $netscapeCookies = $this->convertJsonCookiesToNetscape($cookiesJsonPath);
+                if ($netscapeCookies !== null) {
+                    $feedDir = storage_path('app/private/feeds');
+                    if (!is_dir($feedDir)) {
+                        mkdir($feedDir, 0755, true);
+                    }
+                    file_put_contents($cookiesPath, $netscapeCookies);
+                    $authArg = '--cookies ' . escapeshellarg($cookiesPath);
+                    $usingCookies = true;
+                }
             }
 
             // Stream from yt-dlp directly into ffmpeg
