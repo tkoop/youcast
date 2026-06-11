@@ -7,7 +7,7 @@ YouCast is a simple web application that allows you to turn YouTube videos into 
 - **Quick Conversion:** Turn any YouTube video into a podcast episode by pasting its URL.
 - **Direct Streaming:** Audio is extracted and streamed in real-time, meaning no long wait times or high server storage usage.
 - **Private Feeds:** Each podcast you create has a unique, private RSS URL.
-- **Podcast App Compatible:** Works with Apple Podcasts, Spotify, Overcast, and any other RSS-compliant podcast reader.
+- **Podcast App Compatible:** Works with Pocast Addict, Spotify, Overcast, Apple Podcasts, and any other RSS-compliant podcast reader.
 
 ## Getting Started
 
@@ -16,25 +16,33 @@ YouCast is a simple web application that allows you to turn YouTube videos into 
 - PHP 8.3+
 - Composer
 - Node.js & NPM
-- `yt-dlp` installed and available in your PATH
+- Python 3 (to run `yt-dlp`)
+- `ffmpeg` (for audio transcoding)
 
 ### Installation
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/youcast.git
-   cd youcast
-   ```
 
-2. Run the setup command:
-   ```bash
-   composer run setup
-   ```
+    ```bash
+    git clone https://github.com/your-username/youcast.git
+    cd youcast
+    ```
 
-3. Start the development server:
-   ```bash
-   composer run dev
-   ```
+2. Run the automated setup:
+
+    ```bash
+    composer run setup
+    ```
+
+    This command installs dependencies, sets up your `.env` file, generates an application key, downloads `yt-dlp`, and builds the frontend.
+
+3. Set the APP_URL in .env to be your domain.
+
+4. Start the development server:
+
+    ```bash
+    php artisan serve
+    ```
 
 ## License
 

@@ -8,94 +8,12 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Process\Exception\ProcessFailedException;
+use chillerlan\QRCode\QRCode;
+use chillerlan\QRCode\QROptions;
+use chillerlan\QRCode\Common\EccLevel;
 
 class FeedController extends Controller
 {
-    private function convertJsonCookiesToNetscape($jsonPath)
-    {
-        if (!file_exists($jsonPath)) {
-            return null;
-        }
-
-        try {
-            $jsonContent = file_get_contents($jsonPath);
-            $cookies = json_decode($jsonContent, true);
-
-            if (!is_array($cookies)) {
-                return null;
-            }
-
-            // Create Netscape format header
-            $netscape = "# Netscape HTTP Cookie File\n";
-            $netscape .= "# http://curl.haxx.se/rfc/cookie_spec.html\n";
-            $netscape .= "# This is a generated file!  Do not edit.\n\n";
-
-            $cookieNames = [];
-            $cookieStats = [
-                'cookie_count' => 0,
-                'http_only' => 0,
-                'secure' => 0,
-                'host_only' => 0,
-            ];
-
-            // Convert each cookie to Netscape format
-            foreach ($cookies as $cookie) {
-                // Skip if required fields are missing
-                if (!isset($cookie['name']) || !isset($cookie['value'])) {
-                    continue;
-                }
-
-                $domain = $cookie['domain'] ?? '.youtube.com';
-                $hostOnly = $cookie['hostOnly'] ?? false;
-                $httpOnly = $cookie['httpOnly'] ?? false;
-                $domainSpecified = $hostOnly ? 'FALSE' : 'TRUE';
-                $path = $cookie['path'] ?? '/';
-                $secure = ($cookie['secure'] ?? false) ? 'TRUE' : 'FALSE';
-                $expiration = (int)($cookie['expirationDate'] ?? 0);
-                $name = $cookie['name'] ?? '';
-                $value = $cookie['value'] ?? '';
-
-                if ($httpOnly) {
-                    $domain = '#HttpOnly_' . $domain;
-                }
-
-                // Format: domain domain_specified path secure expiration name value
-                $netscape .= sprintf(
-                    "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
-                    $domain,
-                    $domainSpecified,
-                    $path,
-                    $secure,
-                    $expiration,
-                    $name,
-                    $value
-                );
-
-                $cookieNames[] = $name;
-                $cookieStats['cookie_count']++;
-                if ($httpOnly) {
-                    $cookieStats['http_only']++;
-                }
-                if ($secure === 'TRUE') {
-                    $cookieStats['secure']++;
-                }
-                if ($hostOnly) {
-                    $cookieStats['host_only']++;
-                }
-            }
-
-            Log::info('Converted cookies.json to Netscape format', array_merge($cookieStats, [
-                'cookies_json' => $jsonPath,
-                'cookie_names' => array_slice($cookieNames, 0, 25),
-            ]));
-
-            return $netscape;
-        } catch (\Exception $e) {
-            Log::error("Failed to convert cookies from JSON: " . $e->getMessage());
-            return null;
-        }
-    }
-
     private function extractYouTubeId($url)
     {
         $pattern = '/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i';
@@ -170,27 +88,20 @@ class FeedController extends Controller
 
         $feedData = json_decode(file_get_contents($feedFile), true);
 
-        // Try to load cookies from the JSON file
-        $cookiesJsonPath = storage_path('app/private/cookies.json');
-        $currentCookies = '';
-        if (file_exists($cookiesJsonPath)) {
-            $convertedCookies = $this->convertJsonCookiesToNetscape($cookiesJsonPath);
-            if ($convertedCookies !== null) {
-                $currentCookies = $convertedCookies;
-            }
-        }
+        // Generate QR code for the RSS feed URL
+        $rssUrl = route('feed.rss', ['id' => $id]);
+        $options = new QROptions([
+            'version'             => 5,
+            'eccLevel'            => EccLevel::L,
+            'addQuietzone'        => false,
+            'svgAddXmlHeader'     => false,
+        ]);
 
-        // Fall back to feed-specific cookies file if JSON conversion failed
-        if (empty($currentCookies)) {
-            $feedCookiesPath = storage_path('app/private/feeds/' . $id . '.cookies.txt');
-            if (file_exists($feedCookiesPath)) {
-                $currentCookies = file_get_contents($feedCookiesPath);
-            }
-        }
+        $qrcode = (new QRCode($options))->render($rssUrl);
 
         return view('feed.edit', [
             'feed' => $feedData,
-            'currentCookies' => $currentCookies,
+            'qrcode' => $qrcode,
         ]);
     }
 
@@ -357,73 +268,17 @@ class FeedController extends Controller
         }
 
         return response()->stream(function () use ($youtubeUrl, $ytDlpPath, $episodeId, $id) {
-            // Check for cookies JSON and regenerate the feed cookie file if available.
-            $cookiesPath = storage_path('app/private/feeds/' . $id . '.cookies.txt');
-            $cookiesJsonPath = storage_path('app/private/cookies.json');
-            
-            $authArg = '';
-            $usingCookies = false;
-            $cookieSource = 'none';
-
-            if (file_exists($cookiesJsonPath)) {
-                Log::info("cookies.json found for feed {$id}, regenerating feed cookie file", [
-                    'cookies_json' => $cookiesJsonPath,
-                    'cookies_json_size' => filesize($cookiesJsonPath),
-                    'cookie_output' => $cookiesPath,
-                ]);
-
-                $netscapeCookies = $this->convertJsonCookiesToNetscape($cookiesJsonPath);
-                if ($netscapeCookies !== null) {
-                    $feedDir = storage_path('app/private/feeds');
-                    if (!is_dir($feedDir)) {
-                        mkdir($feedDir, 0755, true);
-                    }
-                    file_put_contents($cookiesPath, $netscapeCookies);
-                    $authArg = '--cookies ' . escapeshellarg($cookiesPath);
-                    $usingCookies = true;
-                    $cookieSource = 'cookies.json';
-
-                    Log::info("Regenerated feed cookies file", [
-                        'feed_cookies' => $cookiesPath,
-                        'cookie_count' => substr_count($netscapeCookies, "\n") - 3,
-                        'cookie_file_size' => filesize($cookiesPath),
-                    ]);
-                } else {
-                    Log::warning("Failed to convert cookies.json to Netscape format", [
-                        'cookies_json' => $cookiesJsonPath,
-                        'feed_id' => $id,
-                    ]);
-                }
-            } elseif (file_exists($cookiesPath)) {
-                $authArg = '--cookies ' . escapeshellarg($cookiesPath);
-                $usingCookies = true;
-                $cookieSource = 'existing';
-                Log::info("Using existing feed cookie file", [
-                    'feed_cookies' => $cookiesPath,
-                    'cookie_file_size' => filesize($cookiesPath),
-                ]);
-            } else {
-                Log::warning("No cookies available for yt-dlp streaming", [
-                    'cookies_json' => $cookiesJsonPath,
-                    'feed_cookie' => $cookiesPath,
-                ]);
-            }
-
             // Stream from yt-dlp directly into ffmpeg
             // Added --extractor-args to try and bypass bot detection
             $command = sprintf(
-                '%s %s -f "ba/b" --no-playlist --no-warnings --extractor-args "youtube:player_client=android,web" %s -o - | ffmpeg -i pipe:0 -f mp3 -b:a 128k -map 0:a -',
+                '%s -f "ba/b" --no-playlist --no-warnings --extractor-args "youtube:player_client=android,web" %s -o - | ffmpeg -i pipe:0 -f mp3 -b:a 128k -map 0:a -',
                 escapeshellarg($ytDlpPath),
-                $authArg,
                 escapeshellarg($youtubeUrl)
             );
 
             Log::info("Starting audio stream for episode {$episodeId} in feed {$id}", [
                 'url' => $youtubeUrl,
                 'command' => $command,
-                'using_cookies' => $usingCookies,
-                'cookie_source' => $cookieSource,
-                'cookie_path' => $cookieSource !== 'none' ? $cookiesPath : null,
             ]);
 
             $descriptorspec = [
@@ -477,23 +332,5 @@ class FeedController extends Controller
             'X-Accel-Buffering' => 'no',
             'Cache-Control' => 'no-cache, must-revalidate',
         ]);
-    }
-
-    public function saveCookies(Request $request, $id)
-    {
-        $cookiesJsonPath = storage_path('app/private/cookies.json');
-        
-        // Convert cookies from JSON file to Netscape format
-        $netscapeCookies = $this->convertJsonCookiesToNetscape($cookiesJsonPath);
-        
-        if ($netscapeCookies === null) {
-            return back()->with('error', 'Cookies file not found or invalid.');
-        }
-
-        // Save the converted cookies to the feed-specific cookies file
-        $cookiesPath = storage_path('app/private/feeds/' . $id . '.cookies.txt');
-        file_put_contents($cookiesPath, $netscapeCookies);
-
-        return back()->with('success', 'YouTube cookies loaded and saved from cookies.json file.');
     }
 }
